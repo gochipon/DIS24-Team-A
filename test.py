@@ -360,9 +360,8 @@ def main():
         if st.button('Save Screen as PDF'):
             pdf = PDF()
             pdf.add_page()
-            pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
-            pdf.set_font('DejaVu', '', 12)
-
+            pdf.add_font('NotoSans', '', 'NotoSansCJKjp-Regular.ttf', uni=True)
+            pdf.set_font('NotoSans', '', 12)
             # Print only the added section
             pdf.multi_cell(0, 10, f'満足度: {st.session_state.satisfaction} 星\n\n')
             pdf.multi_cell(0, 10, st.session_state.plan)
