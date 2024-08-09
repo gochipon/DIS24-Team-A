@@ -7,8 +7,19 @@ from datetime import datetime, date
 import re
 import folium
 from geopy.geocoders import Nominatim
-from streamlit_folium import st_folium
+from streamlit_folium import folium_static
+from fpdf import FPDF
+
 openai.api_key = ""
+class PDF(FPDF):
+    def header(self):
+        self.set_font('Arial', 'B', 12)
+        self.cell(0, 10, 'Travel plan Only for you!', 0, 1, 'C')
+
+    def footer(self):
+        self.set_y(-15)
+        self.set_font('Arial', 'I', 8)
+        self.cell(0, 10, 'Page %s' % self.page_no(), 0, 0, 'C')
 
 def extract_time_and_location(response):
     time_pattern = r'\b(?:[01]?\d|2[0-3]):[0-5]\d\b'
@@ -36,7 +47,7 @@ def display_map(locations):
                 lat, lon = get_coordinates(loc)
                 if lat and lon:
                     folium.Marker([lat, lon], tooltip=loc).add_to(m)
-            st_folium(m, width=500, height=300)
+            st.session_state.map = m  # 地図オブジェクトをセッションステートに保存
         else:
             st.error("None.")
     else:
@@ -220,9 +231,17 @@ def load_document(file_path):
     return document
         
 def main():
+    if 'map' not in st.session_state:
+        st.session_state.map = None
 
     if "message_history" not in st.session_state:
         st.session_state.message_history = []
+
+    if "plan" not in st.session_state:  # sidebar+plan?
+        st.session_state.plan = ""
+
+    if "satisfaction" not in st.session_state:
+        st.session_state.satisfaction = 5 #default
 
     options = ['スケジュールを立てたい', '時間限定イベントに参加したい']
 
@@ -235,14 +254,13 @@ def main():
             location = st.selectbox('旅行の行先を選択してください:', ("京都", "大阪"))
         with col2:
             how = st.selectbox('旅行の行先を選択してください:', ("マイカー", "レンタカー", "公共交通"))
-        
+
         col3, col4 = st.columns(2)
         with col3:
             time1 = st.date_input('到着日を選択してください:', datetime.now())
         with col4:
             time2 = st.date_input('帰還日を選択してください:', datetime.now())
 
-        display_map([location])
         user_input = st.text_area('具体的なニーズをここで述べてください:')
 
         if user_input and len(user_input) <= 2:
@@ -253,7 +271,7 @@ def main():
         with st.sidebar:
             sidebar_input = st.text_area('質問内容(例：東寺の歴史を教えてください):')
 
-            document_text = read_word_document("./eth.docx")
+            document_text = read_word_document("./modelcourse.docx")
             background_info = find_most_relevant_section(document_text, sidebar_input)
             system_prompt1 = background_func(background_info)
 
@@ -264,7 +282,7 @@ def main():
                 {"role": "system", "content": system_prompt1},
                 {"role": "user", "content": sidebar_input},
                     ]
-                
+
                 response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=message,
@@ -284,11 +302,11 @@ def main():
         is_generate_clicked = st.button("文章生成")
 
         if is_generate_clicked:
-            
+
             if selected_options ==  "スケジュールを立てたい":
                 if 'last_response' not in st.session_state:
                     st.session_state.last_response = ""
-                
+
                 question = generate_prompt(location, how, time1, time2, user_input)
                 doc = read_word_document("./modelcourse.docx")
                 doc_info = find_most_relevant_section(doc, question)
@@ -315,49 +333,45 @@ def main():
                 stream=True
             )
 
-            partial_words = "" 
+            partial_words = ""
+
 
         # ストリーミングレスポンスの処理
             for chunk in response:
                 if 'choices' in chunk:
                     chunk_message = chunk['choices'][0]['delta'].get('content', '')
                     partial_words += chunk_message
-                    
+
+            st.session_state['last_response'] = partial_words
+            st.session_state.plan = partial_words  # Store the plan in session_state
+
             times, locations = extract_time_and_location(partial_words)
             display_map(locations)
 
-            st.session_state['last_response'] = partial_words
-            st.write(partial_words)
-
-
+            if st.session_state.map:
+                folium_static(st.session_state.map, width=500, height=300)
             st.session_state.message_history.append({"role": "assistant", "content": partial_words})
-        
 
+            if st.session_state.plan:
+                st.write(st.session_state.plan)
+                st.session_state.satisfaction = st.slider('このプランに満足していますか？', 1, 5,
+                                                          st.session_state.satisfaction)
 
+        if st.button('Save Screen as PDF'):
+            pdf = PDF()
+            pdf.add_page()
+            pdf.add_font('DejaVu', '', 'DejaVuSansCondensed.ttf', uni=True)
+            pdf.set_font('DejaVu', '', 12)
 
+            # Print only the added section
+            pdf.multi_cell(0, 10, f'満足度: {st.session_state.satisfaction} 星\n\n')
+            pdf.multi_cell(0, 10, st.session_state.plan)
 
+            # Save the generated PDF
+            pdf_output_path = 'Your_own_plan.pdf'
+            pdf.output(pdf_output_path)
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+            st.success(f'PDFとして保存しました: {pdf_output_path}')
 
 
     elif selected_options == '時間限定イベントに参加したい':
